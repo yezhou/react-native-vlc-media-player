@@ -16,17 +16,17 @@ import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.WritableNativeArray;
+import com.facebook.react.bridge.WritableArray;
+
 import com.facebook.react.uimanager.ThemedReactContext;
 
-import org.videolan.libvlc.IVLCVout;
+import org.videolan.libvlc.interfaces.IVLCVout;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 
 import java.util.ArrayList;
-
-
-
 
 
 @SuppressLint("ViewConstructor")
@@ -41,8 +41,10 @@ class ReactVlcPlayerView extends TextureView implements
     private final VideoEventEmitter eventEmitter;
     private LibVLC libvlc;
     private MediaPlayer mMediaPlayer = null;
+    private boolean mMuted = false;
     private boolean isSurfaceViewDestory;
     private String src;
+    private String _subtitleUri;
     private boolean netStrTag;
     private ReadableMap srcMap;
     private int mVideoHeight = 0;
@@ -61,12 +63,14 @@ class ReactVlcPlayerView extends TextureView implements
     private int preVolume = 200;
     private boolean autoAspectRatio = false;
 
-    private float mProgressUpdateInterval = 250;
+    private float mProgressUpdateInterval = 0;
     private Handler mProgressUpdateHandler = new Handler();
     private Runnable mProgressUpdateRunnable = null;
 
     private final ThemedReactContext themedReactContext;
     private final AudioManager audioManager;
+
+    private WritableMap mVideoInfo = null;
 
 
     public ReactVlcPlayerView(ThemedReactContext context) {
@@ -146,31 +150,36 @@ class ReactVlcPlayerView extends TextureView implements
     }
 
     private void setProgressUpdateRunnable() {
-        if (mMediaPlayer != null){
-            mProgressUpdateRunnable = new Runnable() {
+        if (mMediaPlayer != null && mProgressUpdateInterval > 0){
+            new Thread() {
                 @Override
                 public void run() {
-                    if (mMediaPlayer != null && !isPaused) {
-                        long currentTime = 0;
-                        long totalLength = 0;
-                        WritableMap event = Arguments.createMap();
-                        boolean isPlaying = mMediaPlayer.isPlaying();
-                        currentTime = mMediaPlayer.getTime();
-                        float position = mMediaPlayer.getPosition();
-                        totalLength = mMediaPlayer.getLength();
-                        WritableMap map = Arguments.createMap();
-                        map.putBoolean("isPlaying", isPlaying);
-                        map.putDouble("position", position);
-                        map.putDouble("currentTime", currentTime);
-                        map.putDouble("duration", totalLength);
-                        eventEmitter.sendEvent(map, VideoEventEmitter.EVENT_PROGRESS);
-                    }
-                    mProgressUpdateHandler.postDelayed(mProgressUpdateRunnable, Math.round(mProgressUpdateInterval));    
+                    super.run();
+
+                    mProgressUpdateRunnable = () -> {
+                        if (mMediaPlayer != null && !isPaused) {
+                            long currentTime = 0;
+                            long totalLength = 0;
+                            WritableMap event = Arguments.createMap();
+                            boolean isPlaying = mMediaPlayer.isPlaying();
+                            currentTime = mMediaPlayer.getTime();
+                            float position = mMediaPlayer.getPosition();
+                            totalLength = mMediaPlayer.getLength();
+                            WritableMap map = Arguments.createMap();
+                            map.putBoolean("isPlaying", isPlaying);
+                            map.putDouble("position", position);
+                            map.putDouble("currentTime", currentTime);
+                            map.putDouble("duration", totalLength);
+                            eventEmitter.sendEvent(map, VideoEventEmitter.EVENT_PROGRESS);
+                        }
+
+                        mProgressUpdateHandler.postDelayed(mProgressUpdateRunnable, Math.round(mProgressUpdateInterval));
+                    };
+
+                    mProgressUpdateHandler.postDelayed(mProgressUpdateRunnable, 0);
                 }
-            };
-            mProgressUpdateHandler.postDelayed(mProgressUpdateRunnable,0);
+            }.start();
         }
-            
     }
 
 
@@ -233,6 +242,11 @@ class ReactVlcPlayerView extends TextureView implements
                     eventEmitter.sendEvent(map, VideoEventEmitter.EVENT_ON_PAUSED);
                     break;
                 case MediaPlayer.Event.Buffering:
+                    if(mVideoInfo == null && mMediaPlayer.getAudioTracksCount() > 0) {
+                        mVideoInfo = getVideoInfo();
+                        eventEmitter.sendEvent(mVideoInfo, VideoEventEmitter.EVENT_ON_LOAD);
+                    }
+
                     map.putDouble("bufferRate", event.getBuffering());
                     map.putString("type", "Buffering");
                     eventEmitter.sendEvent(map, VideoEventEmitter.EVENT_ON_VIDEO_BUFFERING);
@@ -344,6 +358,7 @@ class ReactVlcPlayerView extends TextureView implements
             }
             // Create media player
             mMediaPlayer = new MediaPlayer(libvlc);
+            setMutedModifier(mMuted);
             mMediaPlayer.setEventListener(mPlayerListener);
             //this.getHolder().setKeepScreenOn(true);
             IVLCVout vlcOut = mMediaPlayer.getVLCVout();
@@ -382,8 +397,12 @@ class ReactVlcPlayerView extends TextureView implements
                     m.addOption(option);
                 }
             }
+            mVideoInfo = null;
             mMediaPlayer.setMedia(m);
             mMediaPlayer.setScale(0);
+            if (_subtitleUri != null) {
+                mMediaPlayer.addSlave(Media.Slave.Type.Subtitle, _subtitleUri, true);
+            }
 
             if (!vlcOut.areViewsAttached()) {
                 vlcOut.addCallback(callback);
@@ -418,14 +437,15 @@ class ReactVlcPlayerView extends TextureView implements
     private void releasePlayer() {
         if (libvlc == null)
             return;
-        mMediaPlayer.stop();
+
         final IVLCVout vout = mMediaPlayer.getVLCVout();
         vout.removeCallback(callback);
         vout.detachViews();
         //surfaceView.removeOnLayoutChangeListener(onLayoutChangeListener);
         libvlc.release();
         libvlc = null;
-        if(mProgressUpdateRunnable!=null){
+
+        if(mProgressUpdateRunnable != null){
             mProgressUpdateHandler.removeCallbacks(mProgressUpdateRunnable);
         }
     }
@@ -449,6 +469,13 @@ class ReactVlcPlayerView extends TextureView implements
         }
     }
 
+    public void setSubtitleUri(String subtitleUri) {
+        _subtitleUri = subtitleUri;
+        if (mMediaPlayer != null) {
+            mMediaPlayer.addSlave(Media.Slave.Type.Subtitle,  _subtitleUri, true);
+        }
+    }
+
     /**
      * 设置资源路径
      *
@@ -464,9 +491,7 @@ class ReactVlcPlayerView extends TextureView implements
     public void setSrc(ReadableMap src) {
         this.srcMap = src;
         createPlayer(true, false);
-
     }
-
 
     /**
      * 改变播放速率
@@ -480,7 +505,8 @@ class ReactVlcPlayerView extends TextureView implements
     }
 
     public void setmProgressUpdateInterval(float interval) {
-       mProgressUpdateInterval = interval;
+        mProgressUpdateInterval = interval;
+        createPlayer(true, false);
     }
 
 
@@ -501,6 +527,7 @@ class ReactVlcPlayerView extends TextureView implements
      * @param muted
      */
     public void setMutedModifier(boolean muted) {
+        mMuted = muted;
         if (mMediaPlayer != null) {
             if (muted) {
                 this.preVolume = mMediaPlayer.getVolume();
@@ -572,6 +599,18 @@ class ReactVlcPlayerView extends TextureView implements
         autoAspectRatio = auto;
     }
 
+    public void setAudioTrack(int track) {
+        if (mMediaPlayer != null) {
+            mMediaPlayer.setAudioTrack(track);
+        }
+    }
+
+    public void setTextTrack(int track) {
+        if (mMediaPlayer != null) {
+            mMediaPlayer.setSpuTrack(track);
+        }
+    }
+
 
     public void cleanUpResources() {
         if (surfaceView != null) {
@@ -600,7 +639,7 @@ class ReactVlcPlayerView extends TextureView implements
 
     @Override
     public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-        Log.i("onSurfaceTextureUpdated", "onSurfaceTextureUpdated");
+        // Log.i("onSurfaceTextureUpdated", "onSurfaceTextureUpdated");
     }
 
     private final Media.EventListener mMediaListener = new Media.EventListener() {
@@ -612,6 +651,7 @@ class ReactVlcPlayerView extends TextureView implements
                     break;
                 case Media.Event.ParsedChanged:
                     Log.i(tag, "Media.Event.ParsedChanged  =" + event.getMetaId());
+
                     break;
                 case Media.Event.StateChanged:
                     Log.i(tag, "StateChanged   =" + event.getMetaId());
@@ -623,6 +663,46 @@ class ReactVlcPlayerView extends TextureView implements
             }
         }
     };
+
+    private WritableMap getVideoInfo() {
+
+        WritableMap map = Arguments.createMap();
+
+        map.putDouble("duration", mMediaPlayer.getLength());
+
+        if(mMediaPlayer.getAudioTracksCount() > 0) {
+            MediaPlayer.TrackDescription[] audioTracks = mMediaPlayer.getAudioTracks();
+            WritableArray tracks = new WritableNativeArray();
+            for (MediaPlayer.TrackDescription track : audioTracks) {
+                WritableMap trackMap = Arguments.createMap();
+                trackMap.putInt("id", track.id);
+                trackMap.putString("name", track.name);
+                tracks.pushMap(trackMap);
+            }
+            map.putArray("audioTracks", tracks);
+        }
+
+        if(mMediaPlayer.getSpuTracksCount() > 0) {
+            MediaPlayer.TrackDescription[] spuTracks = mMediaPlayer.getSpuTracks();
+            WritableArray tracks = new WritableNativeArray();
+            for (MediaPlayer.TrackDescription track : spuTracks) {
+                WritableMap trackMap = Arguments.createMap();
+                trackMap.putInt("id", track.id);
+                trackMap.putString("name", track.name);
+                tracks.pushMap(trackMap);
+            }
+            map.putArray("textTracks", tracks);
+        }
+
+        Media.VideoTrack video = mMediaPlayer.getCurrentVideoTrack();
+        if(video != null) {
+            WritableMap mapVideoSize = Arguments.createMap();
+            mapVideoSize.putInt("width", video.width);
+            mapVideoSize.putInt("height", video.height);
+            map.putMap("videoSize", mapVideoSize);
+        }
+        return map;
+    }
 
     /*private void changeSurfaceSize(boolean message) {
 

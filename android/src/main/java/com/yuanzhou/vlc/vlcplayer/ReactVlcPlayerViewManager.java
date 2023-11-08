@@ -19,6 +19,7 @@ public class ReactVlcPlayerViewManager extends SimpleViewManager<ReactVlcPlayerV
 
     private static final String PROP_SRC = "source";
     private static final String PROP_SRC_URI = "uri";
+    private static final String PROP_SUBTITLE_URI = "subtitleUri";
     private static final String PROP_SRC_TYPE = "type";
     private static final String PROP_REPEAT = "repeat";
     private static final String PROP_PAUSED = "paused";
@@ -34,6 +35,8 @@ public class ReactVlcPlayerViewManager extends SimpleViewManager<ReactVlcPlayerV
     private static final String PROP_AUTO_ASPECT_RATIO = "autoAspectRatio";
     private static final String PROP_CLEAR = "clear";
     private static final String PROP_PROGRESS_UPDATE_INTERVAL = "progressUpdateInterval";
+    private static final String PROP_TEXT_TRACK = "textTrack";
+    private static final String PROP_AUDIO_TRACK = "audioTrack";
 
 
     @Override
@@ -80,13 +83,18 @@ public class ReactVlcPlayerViewManager extends SimpleViewManager<ReactVlcPlayerV
 
     }
 
+    @ReactProp(name = PROP_SUBTITLE_URI)
+    public void setSubtitleUri(final ReactVlcPlayerView videoView, final String subtitleUri) {
+        videoView.setSubtitleUri(subtitleUri);
+    }
+
     @ReactProp(name = PROP_REPEAT, defaultBoolean = false)
     public void setRepeat(final ReactVlcPlayerView videoView, final boolean repeat) {
         videoView.setRepeatModifier(repeat);
     }
 
 
-    @ReactProp(name = PROP_PROGRESS_UPDATE_INTERVAL, defaultFloat = 250.0f )
+    @ReactProp(name = PROP_PROGRESS_UPDATE_INTERVAL, defaultFloat = 0f )
     public void setInterval(final ReactVlcPlayerView videoView, final float interval) {
         videoView.setmProgressUpdateInterval(interval);
     }
@@ -146,7 +154,15 @@ public class ReactVlcPlayerViewManager extends SimpleViewManager<ReactVlcPlayerV
         videoView.doSnapshot(snapshotPath);
     }
 
+    @ReactProp(name = PROP_AUDIO_TRACK)
+    public void setAudioTrack(final ReactVlcPlayerView videoView, final int audioTrack) {
+        videoView.setAudioTrack(audioTrack);
+    }
 
+    @ReactProp(name = PROP_TEXT_TRACK)
+    public void setTextTrack(final ReactVlcPlayerView videoView, final int textTrack) {
+        videoView.setTextTrack(textTrack);
+    }
 
     private boolean startsWithValidScheme(String uriString) {
         return uriString.startsWith("http://")

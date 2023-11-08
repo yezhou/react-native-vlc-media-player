@@ -113,3 +113,11 @@ dist
 .yarn/unplugged
 .yarn/build-state.yml
 .pnp.*
+
+# Android
+.gradle
+build/
+
+# MacOS
+.DS_Store
+

@@ -24,6 +24,7 @@ export default class VLCPlayer extends Component {
     this._onBuffering = this._onBuffering.bind(this);
     this._onOpen = this._onOpen.bind(this);
     this._onLoadStart = this._onLoadStart.bind(this);
+    this._onLoad = this._onLoad.bind(this);
     this.changeVideoAspectRatio = this.changeVideoAspectRatio.bind(this);
   }
   static defaultProps = {
@@ -113,6 +114,12 @@ export default class VLCPlayer extends Component {
     }
   }
 
+  _onLoad(event) {
+    if (this.props.onLoad) {
+      this.props.onLoad(event.nativeEvent);
+    }
+  }
+
   render() {
     /* const {
      source
@@ -161,7 +168,8 @@ export default class VLCPlayer extends Component {
       onVideoPaused: this._onPaused,
       onVideoStopped: this._onStopped,
       onVideoBuffering: this._onBuffering,
-      progressUpdateInterval: 250,
+      onVideoLoad: this._onLoad,
+      progressUpdateInterval: this.props.onProgress ? 250 : 0,
     });
 
     return <RCTVLCPlayer ref={this._assignRoot} {...nativeProps} />;
@@ -187,6 +195,8 @@ VLCPlayer.propTypes = {
   poster: PropTypes.string,
   repeat: PropTypes.bool,
   muted: PropTypes.bool,
+  audioTrack: PropTypes.number,
+  textTrack: PropTypes.number,
 
   onVideoLoadStart: PropTypes.func,
   onVideoError: PropTypes.func,
@@ -197,9 +207,11 @@ VLCPlayer.propTypes = {
   onVideoStopped: PropTypes.func,
   onVideoBuffering: PropTypes.func,
   onVideoOpen: PropTypes.func,
+  onVideoLoad: PropTypes.func,
 
   /* Wrapper component */
   source: PropTypes.oneOfType([PropTypes.object, PropTypes.number]),
+  subtitleUri: PropTypes.string,
 
   onError: PropTypes.func,
   onProgress: PropTypes.func,

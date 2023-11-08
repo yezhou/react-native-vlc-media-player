@@ -3,13 +3,23 @@
 #import "React/RCTBridgeModule.h"
 #import "React/RCTEventDispatcher.h"
 #import "React/UIView+React.h"
+#if TARGET_OS_TV
+#import <TVVLCKit/TVVLCKit.h>
+#else
 #import <MobileVLCKit/MobileVLCKit.h>
+#endif
 #import <AVFoundation/AVFoundation.h>
 static NSString *const statusKeyPath = @"status";
 static NSString *const playbackLikelyToKeepUpKeyPath = @"playbackLikelyToKeepUp";
 static NSString *const playbackBufferEmptyKeyPath = @"playbackBufferEmpty";
 static NSString *const readyForDisplayKeyPath = @"readyForDisplay";
 static NSString *const playbackRate = @"rate";
+
+
+#if !defined(DEBUG) || !(TARGET_IPHONE_SIMULATOR)
+    #define NSLog(...)
+#endif
+
 
 @implementation RCTVLCPlayer
 {
@@ -21,6 +31,9 @@ static NSString *const playbackRate = @"rate";
     NSDictionary * _source;
     BOOL _paused;
     BOOL _started;
+    NSString * _subtitleUri;
+
+    NSDictionary * _videoInfo;
 
 }
 
@@ -107,11 +120,13 @@ static NSString *const playbackRate = @"rate";
     }
 
     _player.media = media;
+    _player.media.delegate = self;
     [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
     NSLog(@"autoplay: %i",autoplay);
     self.onVideoLoadStart(@{
                             @"target": self.reactTag
                             });
+
 }
 
 -(void)setSource:(NSDictionary *)source
@@ -120,6 +135,8 @@ static NSString *const playbackRate = @"rate";
         [self _release];
     }
     _source = source;
+    _videoInfo = nil;
+
     // [bavv edit start]
     NSString* uri    = [source objectForKey:@"uri"];
     BOOL    autoplay = [RCTConvert BOOL:[source objectForKey:@"autoplay"]];
@@ -140,14 +157,29 @@ static NSString *const playbackRate = @"rate";
     }
 
     _player.media = media;
+    _player.media.delegate = self;
     [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
     NSLog(@"autoplay: %i",autoplay);
     self.onVideoLoadStart(@{
                            @"target": self.reactTag
                            });
+    if(_subtitleUri) {
+        [_player addPlaybackSlave:_subtitleUri type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
+    }
+
 //    if(autoplay)
         [self play];
 }
+
+- (void)setSubtitleUri:(NSString *)subtitleUri
+{
+    _subtitleUri = [NSURL URLWithString:subtitleUri];
+    if(_player) {
+        [_player addPlaybackSlave:_subtitleUri type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
+    }
+}
+
+// ==== player delegate methods ====
 
 - (void)mediaPlayerTimeChanged:(NSNotification *)aNotification
 {
@@ -164,33 +196,39 @@ static NSString *const playbackRate = @"rate";
         VLCMediaPlayerState state = _player.state;
         switch (state) {
             case VLCMediaPlayerStateOpening:
-                 NSLog(@"VLCMediaPlayerStateOpening %i",1);
+                 NSLog(@"VLCMediaPlayerStateOpening  %i", _player.numberOfAudioTracks);
                 self.onVideoOpen(@{
                                      @"target": self.reactTag
                                      });
                 break;
             case VLCMediaPlayerStatePaused:
                 _paused = YES;
-                NSLog(@"VLCMediaPlayerStatePaused %i",1);
+                NSLog(@"VLCMediaPlayerStatePaused %i", _player.numberOfAudioTracks);
                 self.onVideoPaused(@{
                                      @"target": self.reactTag
                                      });
                 break;
             case VLCMediaPlayerStateStopped:
-                NSLog(@"VLCMediaPlayerStateStopped %i",1);
+                NSLog(@"VLCMediaPlayerStateStopped %i", _player.numberOfAudioTracks);
                 self.onVideoStopped(@{
                                       @"target": self.reactTag
                                       });
                 break;
             case VLCMediaPlayerStateBuffering:
-                NSLog(@"VLCMediaPlayerStateBuffering %i",1);
+                NSLog(@"VLCMediaPlayerStateBuffering %i", _player.numberOfAudioTracks);
+                if(!_videoInfo && _player.numberOfAudioTracks > 0) {
+                    _videoInfo = [self getVideoInfo];
+                    self.onVideoLoad(_videoInfo);
+                }
+
+
                 self.onVideoBuffering(@{
                                         @"target": self.reactTag
                                         });
                 break;
             case VLCMediaPlayerStatePlaying:
                 _paused = NO;
-                NSLog(@"VLCMediaPlayerStatePlaying %i",1);
+                NSLog(@"VLCMediaPlayerStatePlaying %i", _player.numberOfAudioTracks);
                 self.onVideoPlaying(@{
                                       @"target": self.reactTag,
                                       @"seekable": [NSNumber numberWithBool:[_player isSeekable]],
@@ -198,7 +236,7 @@ static NSString *const playbackRate = @"rate";
                                       });
                 break;
             case VLCMediaPlayerStateEnded:
-                NSLog(@"VLCMediaPlayerStateEnded %i",1);
+                NSLog(@"VLCMediaPlayerStateEnded %i",  _player.numberOfAudioTracks);
                 int currentTime   = [[_player time] intValue];
                 int remainingTime = [[_player remainingTime] intValue];
                 int duration      = [_player.media.length intValue];
@@ -212,7 +250,7 @@ static NSString *const playbackRate = @"rate";
                                     });
                 break;
             case VLCMediaPlayerStateError:
-                NSLog(@"VLCMediaPlayerStateError %i",1);
+                NSLog(@"VLCMediaPlayerStateError %i", _player.numberOfAudioTracks);
                 self.onVideoError(@{
                                     @"target": self.reactTag
                                     });
@@ -223,6 +261,19 @@ static NSString *const playbackRate = @"rate";
         }
     }
 }
+
+
+//   ===== media delegate methods =====
+
+-(void)mediaDidFinishParsing:(VLCMedia *)aMedia {
+    NSLog(@"VLCMediaDidFinishParsing %i", _player.numberOfAudioTracks);
+}
+
+- (void)mediaMetaDataDidChange:(VLCMedia *)aMedia{
+    NSLog(@"VLCMediaMetaDataDidChange %i", _player.numberOfAudioTracks);
+}
+
+//   ===================================
 
 -(void)updateVideoProgress
 {
@@ -241,6 +292,44 @@ static NSString *const playbackRate = @"rate";
                                    });
         }
     }
+}
+
+-(NSDictionary *)getVideoInfo
+{
+    NSMutableDictionary *info = [NSMutableDictionary new];
+    info[@"duration"] = _player.media.length.value;
+    int i;
+    if(_player.videoSize.width > 0) {
+        info[@"videoSize"] =  @{
+            @"width":  @(_player.videoSize.width),
+            @"height": @(_player.videoSize.height)
+        };
+    }
+   if(_player.numberOfAudioTracks > 0) {
+        NSMutableArray *tracks = [NSMutableArray new];
+        for (i = 0; i < _player.numberOfAudioTracks; i++) {
+            if(_player.audioTrackIndexes[i] && _player.audioTrackNames[i]) {
+                [tracks addObject:  @{
+                    @"id": _player.audioTrackIndexes[i],
+                    @"name":  _player.audioTrackNames[i]
+                }];
+            }
+        }
+        info[@"audioTracks"] = tracks;
+    }
+    if(_player.numberOfSubtitlesTracks > 0) {
+        NSMutableArray *tracks = [NSMutableArray new];
+        for (i = 0; i < _player.numberOfSubtitlesTracks; i++) {
+            if(_player.videoSubTitlesIndexes[i] && _player.videoSubTitlesNames[i]) {
+                [tracks addObject:  @{
+                    @"id": _player.videoSubTitlesIndexes[i],
+                    @"name":  _player.videoSubTitlesNames[i]
+                }];
+            }
+        }
+        info[@"textTracks"] = tracks;
+    }
+    return info;
 }
 
 - (void)jumpBackward:(int)interval
@@ -274,6 +363,17 @@ static NSString *const playbackRate = @"rate";
 {
     [_player setRate:rate];
 }
+
+-(void)setAudioTrack:(int)track
+{
+    [_player setCurrentAudioTrackIndex: track];
+}
+
+-(void)setTextTrack:(int)track
+{
+    [_player setCurrentVideoSubTitleIndex:track];
+}
+
 
 -(void)setVideoAspectRatio:(NSString *)ratio{
     char *char_content = [ratio cStringUsingEncoding:NSASCIIStringEncoding];
